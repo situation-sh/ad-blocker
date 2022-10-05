@@ -1,1 +1,1 @@
-# add-blocker
+# ad-blocker
