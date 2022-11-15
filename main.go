@@ -2,73 +2,55 @@ package main
 
 import (
 	"fmt"
-	"net"
+	"strings"
 
-	"github.com/google/gopacket"
-	layers "github.com/google/gopacket/layers"
+	"github.com/miekg/dns"
 )
 
-var records map[string]string
+type myCustomServer struct {
+	addr string
+}
+
+// ServeDNS is used to implement the Handler interface
+func (m myCustomServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	if r.Question != nil {
+		// Construire la reponse en commencant par un forward sur 8.8.8.8
+		//  resourceRecord := []dns.RR{"8.8.8.8"}
+		// 	fmt.Printf("%v\n", r)
+		// 	r.Answer = append(r.Answer, []dns.RR{"8.8.8.8"} )
+		w.WriteMsg(r)
+	}
+}
+
+func (m myCustomServer) parsePort() string {
+	return strings.Split(m.addr, ":")[1]
+}
+
+func (m myCustomServer) parseIp() string {
+	return strings.Split(m.addr, ":")[0]
+}
+
+func (m myCustomServer) starterMessage() {
+	fmt.Println("#### The Dns Server is hosted at => ", m.parseIp())
+	fmt.Println("#### The Dns Server is listenning on port => ", m.parsePort())
+}
 
 func main() {
-
-	records = map[string]string{
-		"google.com": "216.58.196.142",
-		"amazon.com": "176.32.103.205",
-	}
-
-	//Listen on UDP Port
-	addr := net.UDPAddr{
-		Port: 8090,
-		IP:   net.ParseIP("127.0.0.1"),
-	}
-	u, _ := net.ListenUDP("udp", &addr)
-
-	// Wait to get request on that port
-	fmt.Println("Listenning on port 8090")
-	for {
-		tmp := make([]byte, 1024)
-		_, addr, _ := u.ReadFrom(tmp)
-		clientAddr := addr
-		packet := gopacket.NewPacket(tmp, layers.LayerTypeDNS, gopacket.Default)
-		dnsPacket := packet.Layer(layers.LayerTypeDNS)
-		tcp, _ := dnsPacket.(*layers.DNS)
-		serveDNS(u, clientAddr, tcp)
-	}
+	// Create a server
+	server := myCustomServer{addr: "127.0.0.1:8053"}
+	// Initialize the Dns server object from the server above
+	dnsServer := dns.Server{Addr: server.addr, Net: "udp", Handler: server, NotifyStartedFunc: server.starterMessage}
+	// fmt.Printf("%+v \n", dnsServer)
+	dnsServer.ListenAndServe()
+	dnsServer.NotifyStartedFunc()
 }
 
-// TODO: understand that function
-func serveDNS(u *net.UDPConn, clientAddr net.Addr, request *layers.DNS) {
-	replyMess := request
-	var dnsAnswer layers.DNSResourceRecord
+// 1. Pouvoir instancier un server Dns
+// Utiliser l'objet serveur dans la lib miekg : Address, network,  à dispositions sur l'objet.
+// Creer un objet bidon qui implemente l'interface Handler (grace a serveDns())
+// NotifyStartedFunc => Message d'intro
 
-	dnsAnswer.Type = layers.DNSTypeA
-	var ip string
-	var err error
-	var ok bool
-	ip, ok = records[string(request.Questions[0].Name)]
-	if !ok {
-		//Todo: Log no data present for the IP and handle:todo
-	}
-	a, _, _ := net.ParseCIDR(ip + "/24")
-	dnsAnswer.Type = layers.DNSTypeA
-	dnsAnswer.IP = a
-	dnsAnswer.Name = []byte(request.Questions[0].Name)
-
-	dnsAnswer.Class = layers.DNSClassIN
-	replyMess.QR = true
-	replyMess.ANCount = 1
-	replyMess.OpCode = layers.DNSOpCodeNotify
-	replyMess.AA = true
-	replyMess.Answers = append(replyMess.Answers, dnsAnswer)
-	replyMess.ResponseCode = layers.DNSResponseCodeNoErr
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{} // See SerializeOptions for more details.
-	err = replyMess.SerializeTo(buf, opts)
-	if err != nil {
-		panic(err)
-	}
-	u.WriteTo(buf.Bytes(), clientAddr)
-
-}
+// Utiliser la function ListenAndServe sur le server.
+// 1. Forwarder la requete vers un autre serveur
+// 2. Regarder la question Dns
+// 3. Faire la réponse (regarder comment remplir le packetDns de retour)
