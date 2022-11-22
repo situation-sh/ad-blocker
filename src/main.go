@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -106,12 +107,16 @@ func forwardRequest(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 func main() {
-	// TODO: Parse Flags et valeur par default
+	// Set & Parse Flags with default value
+	hostFlagPtr := flag.String("h", "127.0.0.1", "flag to define the host of the server")
+	portFlagPtr := flag.String("p", "53", "flag to define the port of the service")
+	flag.Parse()
 
 	// Set an adress for the dns server.
-	address := "127.0.0.1:53"
+	address := *hostFlagPtr + ":" + *portFlagPtr
 
-	// Initialize the mux (Rooting sytem for incoming http adress. Stands on top of the server). It will be in charge of the request dispatch.
+	// Initialize the mux (Rooting sytem for incoming http adress. Stands on top of the server). It will be in charge of the requests dispatch.
+	// Attach the blackList
 	mux := dns.NewServeMux()
 	setBlackList(mux)
 
