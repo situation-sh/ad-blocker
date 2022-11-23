@@ -1,56 +1,71 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"log"
+	"net"
+	"net/http"
 	"strings"
 
+	"github.com/elazarl/goproxy"
 	"github.com/miekg/dns"
 )
 
-type myCustomServer struct {
-	addr string
-}
+const (
+	defaultHost       = "127.0.0.1"
+	port              = "53"
+	redirectionOrigin = "neverssl.com"
+	redirectionTarget = "httpforever.com"
+)
 
-// ServeDNS is used to implement the Handler interface
-func (m myCustomServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
-	if r.Question != nil {
-		// Construire la reponse en commencant par un forward sur 8.8.8.8
-		//  resourceRecord := []dns.RR{"8.8.8.8"}
-		// 	fmt.Printf("%v\n", r)
-		// 	r.Answer = append(r.Answer, []dns.RR{"8.8.8.8"} )
-		w.WriteMsg(r)
+// TODO:  Remplacer les Fmt.Print par la lib "zeroLog"
+// TODO:  Exporter toutes les constantes
+func main() {
+	// Set & Parse Flags with default value
+	hostFlagPtr := flag.String("h", defaultHost, "flag to define the host of the server")
+	portFlagPtr := flag.String("p", port, "flag to define the port of the service")
+	// updateFlagPtr := flag.Bool("u", false, "flag to force the fetch of adservers.txt") // If true, trigger la fonction.
+	flag.Parse()
+
+	// Set an adress for the dns server.
+	address := *hostFlagPtr + ":" + *portFlagPtr
+
+	// Initialize the mux (Rooting sytem for incoming http adress. Stands on top of the server). It will be in charge of the requests dispatch.
+	// Attach the blackList
+	mux := dns.NewServeMux()
+	// Attacher les handlers
+	setBlackList(mux)
+	mux.HandleFunc(redirectionOrigin, redirectRequest)
+	mux.HandleFunc(".", forwardRequest)
+
+	// Initialize the dns server.
+	dnsServer := dns.Server{Addr: address, Net: "udp", Handler: mux, NotifyStartedFunc: func() {
+		fullAddress, port, err := net.SplitHostPort(address)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Println("#### The Dns Server is hosted at => ", fullAddress)
+		fmt.Println("#### The Dns Server is listenning on port => ", port)
+	}}
+	fmt.Println(dnsServer)
+
+	// Start the proxy in a go-routine. It will achieve the redirection by changing the header of the request.
+	go func() {
+		proxy := goproxy.NewProxyHttpServer()
+		proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+			if strings.HasSuffix(r.Host, redirectionOrigin) {
+				r.Host = redirectionTarget
+				fmt.Println(r)
+			}
+			return r, nil
+		})
+		log.Fatal(http.ListenAndServe("127.0.0.1:53120", proxy))
+	}()
+
+	// Start the dns server.
+	if err := dnsServer.ListenAndServe(); err != nil {
+		log.Fatal(err)
 	}
 }
-
-func (m myCustomServer) parsePort() string {
-	return strings.Split(m.addr, ":")[1]
-}
-
-func (m myCustomServer) parseIp() string {
-	return strings.Split(m.addr, ":")[0]
-}
-
-func (m myCustomServer) starterMessage() {
-	fmt.Println("#### The Dns Server is hosted at => ", m.parseIp())
-	fmt.Println("#### The Dns Server is listenning on port => ", m.parsePort())
-}
-
-func main() {
-	// Create a server
-	server := myCustomServer{addr: "127.0.0.1:8053"}
-	// Initialize the Dns server object from the server above
-	dnsServer := dns.Server{Addr: server.addr, Net: "udp", Handler: server, NotifyStartedFunc: server.starterMessage}
-	// fmt.Printf("%+v \n", dnsServer)
-	dnsServer.ListenAndServe()
-	dnsServer.NotifyStartedFunc()
-}
-
-// 1. Pouvoir instancier un server Dns
-// Utiliser l'objet serveur dans la lib miekg : Address, network,  à dispositions sur l'objet.
-// Creer un objet bidon qui implemente l'interface Handler (grace a serveDns())
-// NotifyStartedFunc => Message d'intro
-
-// Utiliser la function ListenAndServe sur le server.
-// 1. Forwarder la requete vers un autre serveur
-// 2. Regarder la question Dns
-// 3. Faire la réponse (regarder comment remplir le packetDns de retour)
