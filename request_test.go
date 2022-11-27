@@ -8,7 +8,7 @@ import (
 )
 
 func TestMain(t *testing.T) {
-	fmt.Println(" ####### START #######")
+	fmt.Println(" ####### START TESTING #######")
 	fmt.Println(" ")
 	fmt.Println(" ============ SERVER ============")
 	go main()
@@ -25,6 +25,6 @@ func TestMain(t *testing.T) {
 	fmt.Println(" ")
 	fmt.Println(" ")
 	fmt.Println(" ")
-	fmt.Println(" ####### END #######")
+	fmt.Println(" ####### END TESTING #######")
 	// send DNS packet to this server
 }

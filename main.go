@@ -2,30 +2,46 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"log"
-	"net"
+	"os"
+
 	"net/http"
 	"strings"
+
+	"log"
 
 	"github.com/elazarl/goproxy"
 	"github.com/miekg/dns"
 )
 
 const (
-	defaultHost       = "127.0.0.1"
+	dnsDefaultHost    = "127.0.0.1"
 	port              = "53"
 	redirectionOrigin = "neverssl.com"
 	redirectionTarget = "httpforever.com"
+	proxyAddr         = "127.0.0.1:53120"
 )
 
-// TODO:  Remplacer les Fmt.Print par la lib "zeroLog"
-// TODO:  Exporter toutes les constantes
+var (
+	dnsLoggerInfo    *log.Logger
+	dnsLoggerFatal   *log.Logger
+	proxyLoggerInfo  *log.Logger
+	proxyLoggerFatal *log.Logger
+)
+
+// HINT: Creation du looger
+// HINT: Pourquoi dnsLoggerInfo := log.logger{out: ...., prefix: ...., etc ...} n'est pas possible ?
+func init() {
+	dnsLoggerInfo = log.New(os.Stdout, "[DNS - Info] ", log.LstdFlags)
+	dnsLoggerFatal = log.New(os.Stdout, "[DNS - Error] ", log.LstdFlags)
+	proxyLoggerInfo = log.New(os.Stdout, "[PROXY - Info] ", log.LstdFlags)
+	proxyLoggerFatal = log.New(os.Stdout, "[PROXY - Error] ", log.LstdFlags)
+}
+
 func main() {
 	// Set & Parse Flags with default value
-	hostFlagPtr := flag.String("h", defaultHost, "flag to define the host of the server")
+	hostFlagPtr := flag.String("h", dnsDefaultHost, "flag to define the host of the server")
 	portFlagPtr := flag.String("p", port, "flag to define the port of the service")
-	// updateFlagPtr := flag.Bool("u", false, "flag to force the fetch of adservers.txt") // If true, trigger la fonction.
+	updateFlagPtr := flag.Bool("u", false, "flag to force the fetch of adservers.txt") // If true, trigger la fonction.
 	flag.Parse()
 
 	// Set an adress for the dns server.
@@ -34,6 +50,10 @@ func main() {
 	// Initialize the mux (Rooting sytem for incoming http adress. Stands on top of the server). It will be in charge of the requests dispatch.
 	// Attach the blackList
 	mux := dns.NewServeMux()
+	// Update the adservers.txt list
+	if *updateFlagPtr {
+		fetchList()
+	}
 	// Attacher les handlers
 	setBlackList(mux)
 	mux.HandleFunc(redirectionOrigin, redirectRequest)
@@ -41,31 +61,28 @@ func main() {
 
 	// Initialize the dns server.
 	dnsServer := dns.Server{Addr: address, Net: "udp", Handler: mux, NotifyStartedFunc: func() {
-		fullAddress, port, err := net.SplitHostPort(address)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		fmt.Println("#### The Dns Server is hosted at => ", fullAddress)
-		fmt.Println("#### The Dns Server is listenning on port => ", port)
+		dnsLoggerInfo.Println("The Dns Server is listenning at", address)
 	}}
-	fmt.Println(dnsServer)
 
 	// Start the proxy in a go-routine. It will achieve the redirection by changing the header of the request.
+	proxy := goproxy.NewProxyHttpServer()
+	proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		if strings.HasSuffix(r.Host, redirectionOrigin) {
+			r.Host = redirectionTarget
+			proxyLoggerInfo.Println("Header request modified : \n", r)
+		}
+		return r, nil
+	})
+
 	go func() {
-		proxy := goproxy.NewProxyHttpServer()
-		proxy.OnRequest().DoFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-			if strings.HasSuffix(r.Host, redirectionOrigin) {
-				r.Host = redirectionTarget
-				fmt.Println(r)
-			}
-			return r, nil
-		})
-		log.Fatal(http.ListenAndServe("127.0.0.1:53120", proxy))
+		proxyLoggerInfo.Println("The Proxy Server is listenning at", proxyAddr)
+		if err := http.ListenAndServe(proxyAddr, proxy); err != nil {
+			proxyLoggerFatal.Fatal(err)
+		}
 	}()
 
 	// Start the dns server.
 	if err := dnsServer.ListenAndServe(); err != nil {
-		log.Fatal(err)
+		dnsLoggerFatal.Fatal(err)
 	}
 }
